@@ -164,7 +164,8 @@ DWORD WINAPI Load()
 
 	Sakura::Sound::Init();
 
-	client_state = ((client_state_t*)*(unsigned int*)((unsigned int)(g_Engine.GetEntityByIndex) + 0x19));
+	while (!client_state)
+		client_state = reinterpret_cast<client_state_t*>(c_Offset.FindClientState());
 
 	while (true)
 	{
