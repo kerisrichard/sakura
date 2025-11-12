@@ -5,6 +5,30 @@ AutoOffset c_Offset;
 // thanks for bloodsharp
 #define offsetof(st, m) ((size_t)&(((st *)0)->m))
 
+namespace
+{
+	bool ExtractClientStateBase(DWORD leaInstruction, DWORD& outBase)
+	{
+		if (!leaInstruction || *(PBYTE)leaInstruction != 0x8D)
+		return false;
+
+		const BYTE modrm = *(PBYTE)(leaInstruction + 1);
+		if ((modrm & 0xC0) != 0x00 || (modrm & 0x07) != 0x04)
+		return false;
+
+		const BYTE sib = *(PBYTE)(leaInstruction + 2);
+		const BYTE base = sib & 0x07;
+		const BYTE index = (sib >> 3) & 0x07;
+		const BYTE scale = (sib >> 6) & 0x03;
+
+		if (base != 0x05 || index != 0x02 || scale != 0x02)
+		return false;
+
+		outBase = *(PDWORD)(leaInstruction + 3);
+		return outBase != 0;
+	}
+}
+
 #define CompareMemory(Buff1, Buff2, Size) __comparemem((const UCHAR *)Buff1, (const UCHAR *)Buff2, (UINT)Size)
 #define FindMemoryClone(Start, End, Clone, Size) __findmemoryclone((const ULONG)Start, (const ULONG)End, (const ULONG)Clone, (UINT)Size)
 #define FindReference(Start, End, Address) __findreference((const ULONG)Start, (const ULONG)End, (const ULONG)Address)
@@ -369,16 +393,39 @@ DWORD AutoOffset::FindUpdateScreen()
 DWORD AutoOffset::FindClientState()
 {
 	DWORD Address = FindPattern(
+		"\xC7\x46\x38\x00\x00\x80\xBF\x89\x7E\x40\x89\x7E\x44\x89\x7E\x48",
+		"xxx???xxxxxxxx",
+		HwBase, HwEnd, 0);
+
+	if (Address)
+	{
+		int lowerBound = static_cast<int>(Address) - 0x40;
+		if (lowerBound < static_cast<int>(HwBase))
+			lowerBound = static_cast<int>(HwBase);
+
+		for (int search = static_cast<int>(Address); search >= lowerBound; --search)
+		{
+			DWORD commandsBase = 0;
+			if (ExtractClientStateBase(static_cast<DWORD>(search), commandsBase))
+			{
+				DWORD result = commandsBase - static_cast<DWORD>(offsetof(client_state_t, commands));
+				if (!FarProc(result, HwBase, HwEnd))
+					return result;
+			}
+		}
+	}
+
+	Address = FindPattern(
 		"\x8D\x34\x95\xFF\xFF\xFF\xFF\x56\xC7\x46\x38\x00\x00\x80\xBF\x89\x7E\x40\x89\x7E\x44\x89\x7E\x48",
 		"xxx????xxxxxxxxxxxxxxxxx",
 		HwBase, HwEnd, 0);
-	
+
 	if (FarProc(Address, HwBase, HwEnd))
 		Error("Couldn't find Client state.");
 
 	Address = *(DWORD*)(Address + 3);
 
-	Address = (uintptr_t)(client_state_t*)(Address - offsetof(client_state_t, commands));
+	Address -= static_cast<DWORD>(offsetof(client_state_t, commands));
 
 	return Address;
 }
